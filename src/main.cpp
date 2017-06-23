@@ -125,22 +125,19 @@ int main() {
           double d = j[1]["steering_angle"];
           double a = j[1]["throttle"];
           
-          d *= deg2rad(25);
-          
-          const double Lf = 2.67 * 0.00062; // meters to miles
+          // Convert d to rad and v to m/s
+//          d *= deg2rad(25);
+          v *= 0.44704;
           
           // Simulate latency in the car state and transform into car space
-          double latency = 0.1 / 3600; // in sec to hours
+          const double Lf = 2.67;
+          double latency = 0.1;
           float x_car = v * cos(p) * latency;
-          float y_car = 0;
+//          float y_car = 0;
+          float y_car = v * sin(p) * latency;
           float p_car = v * (d / Lf) * latency;
           float v_car = v + a * latency;
 
-          /*
-          * TODO: Calculate steering angle and throttle using MPC.
-          *
-          * Both are in between [-1, 1].
-          */
           // Convert world coords to car coords
           Eigen::VectorXd ptsx_car(ptsx.size());
           Eigen::VectorXd ptsy_car(ptsy.size());
@@ -151,7 +148,7 @@ int main() {
           }
           
           // Compute desired trajectory
-          Eigen::VectorXd coeffs = polyfit(ptsx_car, ptsy_car, 2);
+          Eigen::VectorXd coeffs = polyfit(ptsx_car, ptsy_car, 3);
           
           // Compute errors
           double cte = polyeval(coeffs, 0);
@@ -160,7 +157,7 @@ int main() {
           // Build the state
           Eigen::VectorXd state(6);
 //          state << 0, 0, 0, v, cte, ep;
-          state << x_car, y_car, 0, v_car, cte, ep;
+          state << x_car, y_car, p_car, v_car, cte, ep;
           
           vector<double> solution = mpc.Solve(state, coeffs);
           
@@ -171,7 +168,7 @@ int main() {
           
           json msgJson;
           
-          msgJson["steering_angle"] = steer_value;
+          msgJson["steering_angle"] = -steer_value;
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory

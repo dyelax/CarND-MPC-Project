@@ -6,8 +6,8 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-size_t N = 50;
-double dt = 0.05;
+size_t N = 20;
+double dt = 0.1;
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -23,7 +23,7 @@ const double Lf = 2.67;
 
 // Both the reference cross track and orientation errors are 0.
 // The reference velocity is set to 40 mph.
-double v_ref = 25;
+double v_ref = 15;
 
 // The solver takes all the state variables and actuator
 // variables in a singular vector. Thus, we should to establish
@@ -62,13 +62,13 @@ class FG_eval {
       AD<double> ev_t = vars[v_start + t] - v_ref;
       
       // Add in error terms: cte, angular err, velocity err
-      fg[0] += CppAD::pow(vars[cte_start + t], 2) * 0.3 * time_weight;
-      fg[0] += CppAD::pow(vars[ep_start + t], 2) * time_weight;
+      fg[0] += CppAD::pow(vars[cte_start + t], 2) * 0.1 * time_weight;
+      fg[0] += CppAD::pow(vars[ep_start + t], 2) * 10 * time_weight;
       fg[0] += CppAD::pow(ev_t, 2) * time_weight;
       
       if (t < N - 1) {
         // Discourage high actuation values (there are only N-1 actuations)
-        fg[0] += CppAD::pow(vars[d_start + t], 2) * time_weight;
+        fg[0] += CppAD::pow(vars[d_start + t], 2) * 100 * time_weight;
         fg[0] += CppAD::pow(vars[a_start + t], 2) * time_weight;
         
         if (t < N - 2) {
@@ -76,7 +76,7 @@ class FG_eval {
           AD<double> d_diff = vars[d_start + t + 1] - vars[d_start + t];
           AD<double> a_diff = vars[a_start + t + 1] - vars[a_start + t];
           
-          fg[0] += CppAD::pow(d_diff, 2) * time_weight;
+          fg[0] += CppAD::pow(d_diff, 2) * 2 * time_weight;
           fg[0] += CppAD::pow(a_diff, 2) * time_weight;
         }
       }
@@ -115,8 +115,8 @@ class FG_eval {
       AD<double> a_old = vars[a_start + t - 1];
       
       // The desired trajectory at time t - 1
-      AD<double> f_old = coeffs[0] + coeffs[1] * x_old;
-      AD<double> p_des_old = CppAD::atan(coeffs[1]);
+      AD<double> f_old = coeffs[0] + coeffs[1]*x_old + coeffs[2]*x_old*x_old + coeffs[3]*x_old*x_old*x_old;
+      AD<double> p_des_old = CppAD::atan(coeffs[1] + 2*coeffs[2]*x_old + 3*coeffs[3]*x_old*x_old);
       
       // The state at time t
       AD<double> x_new   = vars[x_start + t];
@@ -129,7 +129,7 @@ class FG_eval {
       // Transition constraints:
       fg[2 + x_start + t] = x_new - (x_old + v_old * CppAD::cos(p_old) * dt);
       fg[2 + y_start + t] = y_new - (y_old + v_old * CppAD::sin(p_old) * dt);
-      fg[2 + p_start + t] = p_new - (p_old - v_old * d_old / Lf * dt);
+      fg[2 + p_start + t] = p_new - (p_old + v_old * d_old / Lf * dt);
       fg[2 + v_start + t] = v_new - (v_old + a_old * dt);
       fg[2 + cte_start + t] =
         cte_new - ((f_old - y_old) + (v_old * CppAD::sin(ep_old) * dt));
@@ -280,16 +280,16 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
 //  result.push_back(solution.x[a_start + 1]);
   
   return {
-    solution.x[x_start+00],
+    solution.x[x_start+2],
+    solution.x[x_start+4],
+    solution.x[x_start+6],
+    solution.x[x_start+8],
     solution.x[x_start+10],
-    solution.x[x_start+20],
-    solution.x[x_start+30],
-    solution.x[x_start+40],
-    solution.x[y_start+00],
+    solution.x[y_start+2],
+    solution.x[y_start+4],
+    solution.x[y_start+6],
+    solution.x[y_start+8],
     solution.x[y_start+10],
-    solution.x[y_start+20],
-    solution.x[y_start+30],
-    solution.x[y_start+40],
     solution.x[d_start],
     solution.x[a_start],
   };
