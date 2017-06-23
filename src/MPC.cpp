@@ -6,8 +6,8 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-size_t N = 0;
-double dt = 0;
+size_t N = 50;
+double dt = 0.05;
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -21,6 +21,22 @@ double dt = 0;
 // This is the length from front to CoG that has a similar radius.
 const double Lf = 2.67;
 
+// Both the reference cross track and orientation errors are 0.
+// The reference velocity is set to 40 mph.
+double v_ref = 25;
+
+// The solver takes all the state variables and actuator
+// variables in a singular vector. Thus, we should to establish
+// when one variable starts and another ends to make our lifes easier.
+size_t x_start = 0;
+size_t y_start = x_start + N;
+size_t p_start = y_start + N;
+size_t v_start = p_start + N;
+size_t cte_start = v_start + N;
+size_t ep_start = cte_start + N;
+size_t d_start = ep_start + N;
+size_t a_start = d_start + N - 1;
+
 class FG_eval {
  public:
   // Fitted polynomial coefficients
@@ -30,9 +46,96 @@ class FG_eval {
   typedef CPPAD_TESTVECTOR(AD<double>) ADvector;
   void operator()(ADvector& fg, const ADvector& vars) {
     // TODO: implement MPC
-    // `fg` a vector of the cost constraints, `vars` is a vector of variable values (state & actuators)
+    // `fg` a vector of the cost constraints, `vars` is a vector of variable
+    // values (state & actuators)
     // NOTE: You'll probably go back and forth between this function and
     // the Solver function below.
+    
+    //---------------------
+    // ERROR SETUP:
+    //---------------------
+    fg[0] = 0; // Init the error term
+    
+    double time_weight = 1;
+    for (int t = 0; t < N; t++) {
+      // TODO: maybe can be normal double
+      AD<double> ev_t = vars[v_start + t] - v_ref;
+      
+      // Add in error terms: cte, angular err, velocity err
+      fg[0] += CppAD::pow(vars[cte_start + t], 2) * 0.3 * time_weight;
+      fg[0] += CppAD::pow(vars[ep_start + t], 2) * time_weight;
+      fg[0] += CppAD::pow(ev_t, 2) * time_weight;
+      
+      if (t < N - 1) {
+        // Discourage high actuation values (there are only N-1 actuations)
+        fg[0] += CppAD::pow(vars[d_start + t], 2) * time_weight;
+        fg[0] += CppAD::pow(vars[a_start + t], 2) * time_weight;
+        
+        if (t < N - 2) {
+          // Discourage high change in actuation values for smoother turning/acceleration.
+          AD<double> d_diff = vars[d_start + t + 1] - vars[d_start + t];
+          AD<double> a_diff = vars[a_start + t + 1] - vars[a_start + t];
+          
+          fg[0] += CppAD::pow(d_diff, 2) * time_weight;
+          fg[0] += CppAD::pow(a_diff, 2) * time_weight;
+        }
+      }
+      time_weight *= 0.9;
+    }
+    
+    //---------------------
+    // CONSTRAINT SETUP:
+    //---------------------
+    
+    // We add 1 to each of the starting indices due to cost being located at
+    // index 0 of `fg`. This bumps up the position of all the other values.
+    
+    // Constraints at first timestep are just that all vars = initial value
+    fg[1 + x_start]   = vars[x_start];
+    fg[1 + y_start]   = vars[y_start];
+    fg[1 + p_start]   = vars[p_start];
+    fg[1 + v_start]   = vars[v_start];
+    fg[1 + cte_start] = vars[cte_start];
+    fg[1 + ep_start]  = vars[ep_start];
+    
+    // Constraints at later timesteps are var_new = h(var_old) =>
+    // var_new - h(var_old) = 0. Where h() is the transition function
+    // for each variable.
+    for (int t = 1; t < N - 1; t++) {
+      // The state at time t - 1.
+      AD<double> x_old   = vars[x_start + t - 1];
+      AD<double> y_old   = vars[y_start + t - 1];
+      AD<double> p_old   = vars[p_start + t - 1];
+      AD<double> v_old   = vars[v_start + t - 1];
+      AD<double> cte_old = vars[cte_start + t - 1];
+      AD<double> ep_old  = vars[ep_start + t - 1];
+      
+      // Actuation at time t - 1
+      AD<double> d_old = vars[d_start + t - 1];
+      AD<double> a_old = vars[a_start + t - 1];
+      
+      // The desired trajectory at time t - 1
+      AD<double> f_old = coeffs[0] + coeffs[1] * x_old;
+      AD<double> p_des_old = CppAD::atan(coeffs[1]);
+      
+      // The state at time t
+      AD<double> x_new   = vars[x_start + t];
+      AD<double> y_new   = vars[y_start + t];
+      AD<double> p_new   = vars[p_start + t];
+      AD<double> v_new   = vars[v_start + t];
+      AD<double> cte_new = vars[cte_start + t];
+      AD<double> ep_new  = vars[ep_start + t];
+      
+      // Transition constraints:
+      fg[2 + x_start + t] = x_new - (x_old + v_old * CppAD::cos(p_old) * dt);
+      fg[2 + y_start + t] = y_new - (y_old + v_old * CppAD::sin(p_old) * dt);
+      fg[2 + p_start + t] = p_new - (p_old - v_old * d_old / Lf * dt);
+      fg[2 + v_start + t] = v_new - (v_old + a_old * dt);
+      fg[2 + cte_start + t] =
+        cte_new - ((f_old - y_old) + (v_old * CppAD::sin(ep_old) * dt));
+      fg[2 + ep_start + t] =
+        ep_new - ((p_old - p_des_old) + v_old * d_old / Lf * dt);
+    }
   }
 };
 
@@ -46,15 +149,22 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   bool ok = true;
   size_t i;
   typedef CPPAD_TESTVECTOR(double) Dvector;
+  
+  double x   = state[0];
+  double y   = state[1];
+  double p   = state[2];
+  double v   = state[3];
+  double cte = state[4];
+  double ep  = state[5];
 
   // TODO: Set the number of model variables (includes both states and inputs).
   // For example: If the state is a 4 element vector, the actuators is a 2
   // element vector and there are 10 timesteps. The number of variables is:
   //
   // 4 * 10 + 2 * 9
-  size_t n_vars = 0;
+  size_t n_vars = N * 6 + (N - 1) * 2;
   // TODO: Set the number of constraints
-  size_t n_constraints = 0;
+  size_t n_constraints = N * 6;
 
   // Initial value of the independent variables.
   // SHOULD BE 0 besides initial state.
@@ -62,10 +172,36 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   for (int i = 0; i < n_vars; i++) {
     vars[i] = 0;
   }
+  vars[x_start] = x;
+  vars[y_start] = y;
+  vars[p_start] = p;
+  vars[v_start] = v;
+  vars[cte_start] = cte;
+  vars[ep_start] = ep;
 
+  // Set lower and upper limits for variables.
   Dvector vars_lowerbound(n_vars);
   Dvector vars_upperbound(n_vars);
-  // TODO: Set lower and upper limits for variables.
+  
+  // Set all non-actuators upper and lowerlimits
+  // to the max negative and positive values.
+  for (int i = 0; i < d_start; i++) {
+    vars_lowerbound[i] = -1.0e19;
+    vars_upperbound[i] = 1.0e19;
+  }
+  
+  // The upper and lower limits of delta are set to -25 and 25
+  // degrees (values in radians).
+  for (int i = d_start; i < a_start; i++) {
+    vars_lowerbound[i] = -0.436332;
+    vars_upperbound[i] = 0.436332;
+  }
+  
+  // Acceleration/decceleration upper and lower limits.
+  for (int i = a_start; i < n_vars; i++) {
+    vars_lowerbound[i] = -1.0;
+    vars_upperbound[i] = 1.0;
+  }
 
   // Lower and upper limits for the constraints
   // Should be 0 besides initial state.
@@ -75,6 +211,20 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
     constraints_lowerbound[i] = 0;
     constraints_upperbound[i] = 0;
   }
+  
+  constraints_lowerbound[x_start] = x;
+  constraints_lowerbound[y_start] = y;
+  constraints_lowerbound[p_start] = p;
+  constraints_lowerbound[v_start] = v;
+  constraints_lowerbound[cte_start] = cte;
+  constraints_lowerbound[ep_start] = ep;
+  
+  constraints_upperbound[x_start] = x;
+  constraints_upperbound[y_start] = y;
+  constraints_upperbound[p_start] = p;
+  constraints_upperbound[v_start] = v;
+  constraints_upperbound[cte_start] = cte;
+  constraints_upperbound[ep_start] = ep;
 
   // object that computes objective and constraints
   FG_eval fg_eval(coeffs);
@@ -117,5 +267,30 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   //
   // {...} is shorthand for creating a vector, so auto x1 = {1.0,2.0}
   // creates a 2 element double vector.
-  return {};
+  
+//  vector<double> result;
+//  // Add all x and y points
+//  for (int i = 1; i < y_start + 1; i++) {
+//    result.push_back(solution.x[i]);
+//  }
+//  
+//  // Add first actuations
+//  // TODO: maybe remove +1
+//  result.push_back(solution.x[d_start + 1]);
+//  result.push_back(solution.x[a_start + 1]);
+  
+  return {
+    solution.x[x_start+00],
+    solution.x[x_start+10],
+    solution.x[x_start+20],
+    solution.x[x_start+30],
+    solution.x[x_start+40],
+    solution.x[y_start+00],
+    solution.x[y_start+10],
+    solution.x[y_start+20],
+    solution.x[y_start+30],
+    solution.x[y_start+40],
+    solution.x[d_start],
+    solution.x[a_start],
+  };
 }
