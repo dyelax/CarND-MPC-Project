@@ -22,8 +22,7 @@ double dt = 0.1;
 const double Lf = 2.67;
 
 // Both the reference cross track and orientation errors are 0.
-// The reference velocity is set to 40 mph.
-double v_ref = 15;
+double v_ref = 30;
 
 // The solver takes all the state variables and actuator
 // variables in a singular vector. Thus, we should to establish
@@ -62,13 +61,13 @@ class FG_eval {
       AD<double> ev_t = vars[v_start + t] - v_ref;
       
       // Add in error terms: cte, angular err, velocity err
-      fg[0] += CppAD::pow(vars[cte_start + t], 2) * 0.1 * time_weight;
-      fg[0] += CppAD::pow(vars[ep_start + t], 2) * 10 * time_weight;
-      fg[0] += CppAD::pow(ev_t, 2) * time_weight;
+      fg[0] += CppAD::pow(vars[cte_start + t], 2) * 100 * time_weight;
+      fg[0] += CppAD::pow(vars[ep_start + t], 2) * time_weight;
+      fg[0] += CppAD::pow(ev_t, 2) * 100 * time_weight;
       
       if (t < N - 1) {
         // Discourage high actuation values (there are only N-1 actuations)
-        fg[0] += CppAD::pow(vars[d_start + t], 2) * 100 * time_weight;
+        fg[0] += CppAD::pow(vars[d_start + t], 2) * 80000 * time_weight;
         fg[0] += CppAD::pow(vars[a_start + t], 2) * time_weight;
         
         if (t < N - 2) {
@@ -76,7 +75,7 @@ class FG_eval {
           AD<double> d_diff = vars[d_start + t + 1] - vars[d_start + t];
           AD<double> a_diff = vars[a_start + t + 1] - vars[a_start + t];
           
-          fg[0] += CppAD::pow(d_diff, 2) * 2 * time_weight;
+          fg[0] += CppAD::pow(d_diff, 2) * 8000 * time_weight;
           fg[0] += CppAD::pow(a_diff, 2) * time_weight;
         }
       }
@@ -115,8 +114,13 @@ class FG_eval {
       AD<double> a_old = vars[a_start + t - 1];
       
       // The desired trajectory at time t - 1
-      AD<double> f_old = coeffs[0] + coeffs[1]*x_old + coeffs[2]*x_old*x_old + coeffs[3]*x_old*x_old*x_old;
-      AD<double> p_des_old = CppAD::atan(coeffs[1] + 2*coeffs[2]*x_old + 3*coeffs[3]*x_old*x_old);
+      AD<double> f_old = coeffs[0] +
+                         coeffs[1] * x_old +
+                         coeffs[2] * pow(x_old, 2) +
+                         coeffs[3] * pow(x_old, 3);
+      AD<double> p_des_old = CppAD::atan(coeffs[1] +
+                                         2 * coeffs[2] * x_old +
+                                         3 * coeffs[3] * pow(x_old, 2));
       
       // The state at time t
       AD<double> x_new   = vars[x_start + t];
@@ -264,33 +268,20 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
 
   // TODO: Return the first actuator values. The variables can be accessed with
   // `solution.x[i]`.
-  //
-  // {...} is shorthand for creating a vector, so auto x1 = {1.0,2.0}
-  // creates a 2 element double vector.
   
-//  vector<double> result;
-//  // Add all x and y points
-//  for (int i = 1; i < y_start + 1; i++) {
-//    result.push_back(solution.x[i]);
-//  }
-//  
-//  // Add first actuations
-//  // TODO: maybe remove +1
-//  result.push_back(solution.x[d_start + 1]);
-//  result.push_back(solution.x[a_start + 1]);
+  vector<double> results;
   
-  return {
-    solution.x[x_start+2],
-    solution.x[x_start+4],
-    solution.x[x_start+6],
-    solution.x[x_start+8],
-    solution.x[x_start+10],
-    solution.x[y_start+2],
-    solution.x[y_start+4],
-    solution.x[y_start+6],
-    solution.x[y_start+8],
-    solution.x[y_start+10],
-    solution.x[d_start],
-    solution.x[a_start],
-  };
+  // Add actuation to return vector
+  results.push_back(solution.x[d_start]);
+  results.push_back(solution.x[a_start]);
+  
+  // Add predicted locations to return vector
+  for (int t = 0; t < N - 1; t++) {
+    results.push_back(solution.x[x_start + t]);
+  }
+  for (int t = 0; t < N - 1; t++) {
+    results.push_back(solution.x[y_start + t]);
+  }
+
+  return results;
 }

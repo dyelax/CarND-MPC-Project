@@ -65,37 +65,6 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   return result;
 }
 
-//Eigen::VectorXd car2world(double obs_x_car,
-//                          double obs_y_car,
-//                          double car_x_world,
-//                          double car_y_world,
-//                          double car_p_world) {
-//  double obs_x_world = car_x_world +
-//                       obs_x_car * cos(car_p_world) -
-//                       obs_y_car * sin(p);
-//  double obs_y_world = car_y_world +
-//                       obs_x_car * sin(car_p_world) +
-//                       obs_y_car * cos(p);
-//  
-//  Eigen::VectorXd pos;
-//  pos << obs_x_world, obs_y_world;
-//  return pos;
-//}
-Eigen::VectorXd world2car(double obs_x_world,
-                          double obs_y_world,
-                          double car_x_world,
-                          double car_y_world,
-                          double car_p_world) {
-  double obs_x_car = (obs_x_world - car_x_world) * cos(car_p_world) -
-                     (obs_y_world - car_y_world) * sin(car_p_world);
-  double obs_y_car = (obs_x_world - car_x_world) * sin(car_p_world) +
-                     (obs_y_world - car_y_world) * cos(car_p_world);
-  
-  Eigen::VectorXd pos;
-  pos << obs_x_car, obs_y_car;
-  return pos;
-}
-
 int main() {
   uWS::Hub h;
 
@@ -126,75 +95,85 @@ int main() {
           double a = j[1]["throttle"];
           
           // Convert d to rad and v to m/s
-//          d *= deg2rad(25);
+          d *= -1;
           v *= 0.44704;
           
           // Simulate latency in the car state and transform into car space
           const double Lf = 2.67;
           double latency = 0.1;
-          float x_car = v * cos(p) * latency;
-//          float y_car = 0;
-          float y_car = v * sin(p) * latency;
-          float p_car = v * (d / Lf) * latency;
-          float v_car = v + a * latency;
+          float x_car = 0;
+          float y_car = 0;
+          float p_car = 0;
+          float v_car = v;
+          
+          float x_car_latency = x_car + v * cos(p_car) * latency;
+          float y_car_latency = y_car + v * sin(p_car) * latency;
+          float p_car_latency = p_car + (v / Lf) * d * latency;
+          float v_car_latency = v_car + a * latency;
 
           // Convert world coords to car coords
           Eigen::VectorXd ptsx_car(ptsx.size());
           Eigen::VectorXd ptsy_car(ptsy.size());
           
           for (int i = 0; i < ptsx.size(); i++) {
-            ptsx_car[i] = (ptsx[i] - x) * cos(-p) - (ptsy[i] - y) * sin(-p);
-            ptsy_car[i] = (ptsx[i] - x) * sin(-p) + (ptsy[i] - y) * cos(-p);
+            ptsx_car[i] = (ptsx[i] - x) * cos(p) + (ptsy[i] - y) * sin(p);
+            ptsy_car[i] = -(ptsx[i] - x) * sin(p) + (ptsy[i] - y) * cos(p);
           }
           
           // Compute desired trajectory
           Eigen::VectorXd coeffs = polyfit(ptsx_car, ptsy_car, 3);
           
-          // Compute errors
-          double cte = polyeval(coeffs, 0);
-          double ep = atan(coeffs[1]);
-
+          // Compute errors in car space
+          double cte_car = polyeval(coeffs, 0);
+          double ep_car = -atan(coeffs[1]);
+          
+          // Simulate latency in the errors
+          double cte_car_latency = cte_car - y_car + (v_car * sin(ep_car) * latency);
+          double ep_car_latency = ep_car + (v / Lf) * d * latency;
+          
           // Build the state
           Eigen::VectorXd state(6);
-//          state << 0, 0, 0, v, cte, ep;
-          state << x_car, y_car, p_car, v_car, cte, ep;
+          state << x_car_latency,
+                   y_car_latency,
+                   p_car_latency,
+                   v_car_latency,
+                   cte_car_latency,
+                   ep_car_latency;
+//          state << 0, 0, 0, v, cte_car, ep_car;
           
           vector<double> solution = mpc.Solve(state, coeffs);
           
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          double steer_value = solution[solution.size() - 2] / deg2rad(25);
-          double throttle_value = solution[solution.size() - 1];
+          double steer_value = -solution[0] / deg2rad(25);
+          double throttle_value = solution[1];
           
           json msgJson;
           
-          msgJson["steering_angle"] = -steer_value;
+          msgJson["steering_angle"] = steer_value;
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory
           vector<double> mpc_x_vals;
           vector<double> mpc_y_vals;
-
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Green line
           
-          mpc_x_vals = {solution[0], solution[1], solution[2], solution[3], solution[4]};
-          mpc_y_vals = {solution[5], solution[6], solution[7], solution[8], solution[9]};
+          int N = (solution.size() - 2) / 2;
+          
+          for (int i = 2; i < N + 2; i++) {
+            mpc_x_vals.push_back(solution[i]);
+            mpc_y_vals.push_back(solution[i+N]);
+          }
           
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
 
-          //Display the waypoints/reference line
+//          Display the waypoints/reference line
           vector<double> next_x_vals;
           vector<double> next_y_vals;
-
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Yellow line
           
           for (int i = 0; i < ptsx.size(); i++) {
             next_x_vals.push_back(ptsx_car[i]);
             next_y_vals.push_back(ptsy_car[i]);
-//            next_y_vals.push_back(polyeval(coeffs, ptsx_car[i]));
           }
 
           msgJson["next_x"] = next_x_vals;
