@@ -117,7 +117,7 @@ int main() {
           
           for (int i = 0; i < ptsx.size(); i++) {
             ptsx_car[i] = (ptsx[i] - x) * cos(p) + (ptsy[i] - y) * sin(p);
-            ptsy_car[i] = -(ptsx[i] - x) * sin(p) + (ptsy[i] - y) * cos(p);
+            ptsy_car[i] = (ptsy[i] - y) * cos(p) - (ptsx[i] - x) * sin(p);
           }
           
           // Compute desired trajectory
@@ -139,7 +139,6 @@ int main() {
                    v_car_latency,
                    cte_car_latency,
                    ep_car_latency;
-//          state << 0, 0, 0, v, cte_car, ep_car;
           
           vector<double> solution = mpc.Solve(state, coeffs);
           

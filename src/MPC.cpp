@@ -22,7 +22,7 @@ double dt = 0.1;
 const double Lf = 2.67;
 
 // Both the reference cross track and orientation errors are 0.
-double v_ref = 30;
+double v_ref = 20;
 
 // The solver takes all the state variables and actuator
 // variables in a singular vector. Thus, we should to establish
@@ -61,7 +61,7 @@ class FG_eval {
       AD<double> ev_t = vars[v_start + t] - v_ref;
       
       // Add in error terms: cte, angular err, velocity err
-      fg[0] += CppAD::pow(vars[cte_start + t], 2) * 100 * time_weight;
+      fg[0] += CppAD::pow(vars[cte_start + t], 2) * 50 * time_weight;
       fg[0] += CppAD::pow(vars[ep_start + t], 2) * time_weight;
       fg[0] += CppAD::pow(ev_t, 2) * 100 * time_weight;
       
